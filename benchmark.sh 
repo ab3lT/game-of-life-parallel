@@ -1,0 +1,177 @@
+#!/bin/bash
+
+# Benchmark script for Game of Life implementations
+# Measures performance across different thread counts
+
+echo "================================="
+echo "Game of Life Performance Benchmark"
+echo "================================="
+echo ""
+
+SEED=12345
+SIZE=500
+ITERS=200
+PROB=0.2
+RUNS=3
+
+# Function to run benchmark
+run_benchmark() {
+    local impl=$1
+    local threads=$2
+    local display=$3
+    
+    local total_time=0
+    
+    for run in $(seq 1 $RUNS); do
+        # Capture timing output
+        if [ "$display" == "yes" ]; then
+            time_output=$(./$impl -n $SIZE -i $ITERS -t $threads -s $SEED -p $PROB 2>&1 | grep "Running time")
+        else
+            time_output=$(./$impl -n $SIZE -i $ITERS -t $threads -s $SEED -p $PROB -d 2>&1 | grep "Running time")
+        fi
+        
+        # Extract time value
+        time_val=$(echo "$time_output" | awk '{print $6}')
+        total_time=$(echo "$total_time + $time_val" | bc)
+    done
+    
+    # Calculate average
+    avg_time=$(echo "scale=2; $total_time / $RUNS" | bc)
+    echo "$avg_time"
+}
+
+# Benchmark OpenMP
+benchmark_openmp() {
+    echo "--- OpenMP Implementation ---"
+    cd OpenMP || exit 1
+    
+    if [ ! -f life ]; then
+        echo "ERROR: life executable not found. Run 'make' first."
+        cd ..
+        return 1
+    fi
+    
+    echo ""
+    echo "Configuration: ${SIZE}x${SIZE} grid, $ITERS iterations, probability=$PROB"
+    echo "Running $RUNS trials per configuration..."
+    echo ""
+    
+    echo "Results with display DISABLED:"
+    echo "Threads | Avg Time (s) | Speedup | Efficiency"
+    echo "--------|--------------|---------|------------"
+    
+    # Baseline with 1 thread
+    time_1=$(run_benchmark "life" 1 "no")
+    echo "   1    |    $time_1    |  1.00x  |   100%"
+    
+    # Test with multiple threads
+    for threads in 2 4 8 16; do
+        time_n=$(run_benchmark "life" $threads "no")
+        speedup=$(echo "scale=2; $time_1 / $time_n" | bc)
+        efficiency=$(echo "scale=1; ($speedup / $threads) * 100" | bc)
+        printf "%4d    |   %6.2f   | %5.2fx  |  %5.1f%%\n" $threads $time_n $speedup $efficiency
+    done
+    
+    echo ""
+    echo "Results with display ENABLED:"
+    echo "Threads | Avg Time (s) | Overhead"
+    echo "--------|--------------|----------"
+    
+    for threads in 2 4 8; do
+        time_display=$(run_benchmark "life" $threads "yes")
+        time_no_display=$(run_benchmark "life" $threads "no")
+        overhead=$(echo "scale=1; (($time_display - $time_no_display) / $time_no_display) * 100" | bc)
+        printf "%4d    |   %6.2f   |  %5.1f%%\n" $threads $time_display $overhead
+    done
+    
+    cd ..
+}
+
+# Benchmark Pthreads
+benchmark_pthreads() {
+    echo ""
+    echo "--- Pthreads Implementation ---"
+    cd Pthreads || exit 1
+    
+    if [ ! -f life ]; then
+        echo "ERROR: life executable not found. Run 'make' first."
+        cd ..
+        return 1
+    fi
+    
+    echo ""
+    echo "Configuration: ${SIZE}x${SIZE} grid, $ITERS iterations, probability=$PROB"
+    echo "Running $RUNS trials per configuration..."
+    echo ""
+    
+    echo "Results with display DISABLED:"
+    echo "Threads | Avg Time (s) | Speedup | Efficiency"
+    echo "--------|--------------|---------|------------"
+    
+    # Baseline with 1 thread
+    time_1=$(run_benchmark "life" 1 "no")
+    echo "   1    |    $time_1    |  1.00x  |   100%"
+    
+    # Test with multiple threads
+    for threads in 2 4 8 16; do
+        time_n=$(run_benchmark "life" $threads "no")
+        speedup=$(echo "scale=2; $time_1 / $time_n" | bc)
+        efficiency=$(echo "scale=1; ($speedup / $threads) * 100" | bc)
+        printf "%4d    |   %6.2f   | %5.2fx  |  %5.1f%%\n" $threads $time_n $speedup $efficiency
+    done
+    
+    echo ""
+    echo "Results with display ENABLED:"
+    echo "Threads | Avg Time (s) | Overhead"
+    echo "--------|--------------|----------"
+    
+    for threads in 2 4 8; do
+        time_display=$(run_benchmark "life" $threads "yes")
+        time_no_display=$(run_benchmark "life" $threads "no")
+        overhead=$(echo "scale=1; (($time_display - $time_no_display) / $time_no_display) * 100" | bc)
+        printf "%4d    |   %6.2f   |  %5.1f%%\n" $threads $time_display $overhead
+    done
+    
+    cd ..
+}
+
+# Generate CSV for plotting
+generate_csv() {
+    echo ""
+    echo "Generating CSV data for plotting..."
+    
+    echo "threads,openmp_time,pthreads_time" > benchmark_results.csv
+    
+    cd OpenMP
+    for threads in 1 2 4 8 16; do
+        omp_time=$(run_benchmark "life" $threads "no")
+        cd ../Pthreads
+        pthread_time=$(run_benchmark "life" $threads "no")
+        cd ../OpenMP
+        echo "$threads,$omp_time,$pthread_time" >> ../benchmark_results.csv
+    done
+    cd ..
+    
+    echo "Results saved to benchmark_results.csv"
+}
+
+# Main execution
+echo "System Information:"
+echo "  CPU: $(lscpu | grep "Model name" | cut -d: -f2 | xargs)"
+echo "  Cores: $(nproc)"
+echo "  Date: $(date)"
+echo ""
+
+benchmark_openmp
+benchmark_pthreads
+generate_csv
+
+echo ""
+echo "================================="
+echo "Benchmark Complete"
+echo "================================="
+echo ""
+echo "To visualize results, you can use:"
+echo "  - Import benchmark_results.csv into Excel/LibreOffice"
+echo "  - Use gnuplot with the provided data"
+echo "  - Use Python matplotlib"
